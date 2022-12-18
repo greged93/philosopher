@@ -89,7 +89,6 @@ impl Philosopher {
     }
 }
 
-// TODO add state eating, eating has minimum time and can die while eating
 pub fn start_dinning(amount: usize) -> Result<Vec<JoinHandle<()>>, Error> {
     let mut handles = vec![];
     let dead_philo = Arc::new(Mutex::new(false));
