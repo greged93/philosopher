@@ -4,6 +4,7 @@ use crate::constants::*;
 use anyhow::Error;
 use std::{
     fmt::Display,
+    ops::Drop,
     sync::{Arc, Mutex},
     thread::{self, JoinHandle},
     time::{self, SystemTime, UNIX_EPOCH},
@@ -16,7 +17,6 @@ enum Activity {
     Sleep,
     Think,
     TakingFork,
-    Die,
 }
 
 // TODO implement the drop trait for philosopher allowing you to just print died when dropped
@@ -32,7 +32,6 @@ impl Display for Philosopher {
             Activity::Eat => "is eating",
             Activity::Sleep => "is sleeping",
             Activity::Think => "is thinking",
-            Activity::Die => "died",
             Activity::TakingFork => "has taken a fork",
             _ => "error",
         };
@@ -49,6 +48,12 @@ impl Display for Philosopher {
     }
 }
 
+impl Drop for Philosopher {
+    fn drop(&mut self) {
+        println!("{} {} died", SystemTime::now() .duration_since(UNIX_EPOCH) .unwrap() .as_millis(), self.table_position + 1);
+    }
+}
+
 impl Philosopher {
     pub fn new(pos: usize) -> Self {
         return Philosopher {
@@ -61,7 +66,6 @@ impl Philosopher {
     pub fn change_activity(&mut self) {
         match self.activity {
             Activity::Start => self.activity = Activity::Eat,
-            Activity::Die => self.activity = Activity::Die,
             Activity::Eat => self.activity = Activity::Sleep,
             Activity::Sleep => self.activity = Activity::Think,
             Activity::Think => self.activity = Activity::Eat,
@@ -98,7 +102,6 @@ pub fn start_dinning(amount: usize) -> Result<Vec<JoinHandle<()>>, Error> {
                     Activity::Think => {
                         println!("{}", philo);
                         // TODO thinking has no duration time, should just be a state after eating before taking both forks
-                        thread::sleep(time::Duration::from_millis(TIME_THINK as u64))
                     }
                     Activity::Eat => {
                         philo.activity = Activity::TakingFork;
@@ -111,7 +114,6 @@ pub fn start_dinning(amount: usize) -> Result<Vec<JoinHandle<()>>, Error> {
                         philo.ts_last_eat = SystemTime::now();
                         thread::sleep(time::Duration::from_millis(TIME_EAT as u64));
                     }
-                    Activity::Die => (),
                     _ => panic!("incorrect state"),
                 }
                 if SystemTime::now()
@@ -121,14 +123,10 @@ pub fn start_dinning(amount: usize) -> Result<Vec<JoinHandle<()>>, Error> {
                     >= TIME_DIE
                 {
                     let mut dead = my_dead_philo.lock().unwrap();
-                    philo.activity = Activity::Die;
                     *dead = true;
-                    println!("{}", philo);
                     return;
                 }
                 if *my_dead_philo.lock().unwrap() {
-                    philo.activity = Activity::Die;
-                    println!("{}", philo);
                     return;
                 }
             }
