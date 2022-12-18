@@ -5,7 +5,7 @@ use anyhow::Error;
 use std::{
     fmt::Display,
     ops::Drop,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, MutexGuard},
     thread::{self, JoinHandle},
     time::{self, SystemTime, UNIX_EPOCH},
     vec,
@@ -14,6 +14,7 @@ use std::{
 enum Activity {
     Start,
     Eat,
+    Eating,
     Sleep,
     Think,
     TakingFork,
@@ -22,13 +23,14 @@ enum Activity {
 struct Philosopher {
     pub activity: Activity,
     pub ts_last_eat: SystemTime,
+    pub ts_eating: SystemTime,
     pub table_position: usize,
 }
 
 impl Display for Philosopher {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let state = match self.activity {
-            Activity::Eat => "is eating",
+            Activity::Eating => "is eating",
             Activity::Sleep => "is sleeping",
             Activity::Think => "is thinking",
             Activity::TakingFork => "has taken a fork",
@@ -49,7 +51,14 @@ impl Display for Philosopher {
 
 impl Drop for Philosopher {
     fn drop(&mut self) {
-        println!("{} {} died", SystemTime::now() .duration_since(UNIX_EPOCH) .unwrap() .as_millis(), self.table_position + 1);
+        println!(
+            "{} {} died",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis(),
+            self.table_position + 1
+        );
     }
 }
 
@@ -58,18 +67,25 @@ impl Philosopher {
         return Philosopher {
             activity: Activity::Start,
             ts_last_eat: SystemTime::now(),
+            ts_eating: SystemTime::now(),
             table_position: pos,
         };
     }
 
-    pub fn change_activity(&mut self) {
-        match self.activity {
-            Activity::Start => self.activity = Activity::Eat,
-            Activity::Eat => self.activity = Activity::Sleep,
-            Activity::Sleep => self.activity = Activity::Think,
-            Activity::Think => self.activity = Activity::Eat,
-            _ => (),
-        }
+    pub fn is_dead(&self) -> bool {
+        SystemTime::now()
+            .duration_since(self.ts_last_eat)
+            .unwrap()
+            .as_millis()
+            >= TIME_DIE
+    }
+
+    pub fn is_done_eating(&self) -> bool {
+        SystemTime::now()
+            .duration_since(self.ts_eating)
+            .unwrap()
+            .as_millis()
+            > TIME_EAT
     }
 }
 
@@ -89,48 +105,59 @@ pub fn start_dinning(amount: usize) -> Result<Vec<JoinHandle<()>>, Error> {
     return Ok(handles);
 }
 
-fn philo_routine(i: usize, amount: usize, forks: Arc<Vec<Mutex<i32>>>, dead_philo: Arc<Mutex<bool>>){
-            let mut philo = Philosopher::new(i);
-            let position = philo.table_position;
-            // allows to pick position, (position + amount - 1) % amount if position is even and (position + amount - 1) % amount, position if position is odd
-            let f = vec![position, (position + amount - 1) % amount, position];
-            loop {
-                philo.change_activity();
-                match philo.activity {
-                    Activity::Sleep => {
-                        println!("{}", philo);
-                        thread::sleep(time::Duration::from_millis(TIME_SLEEP as u64))
-                    }
-                    Activity::Think => {
-                        println!("{}", philo);
-                    }
-                    Activity::Eat => {
-                        let _right_fork = forks[f[position % 2]].lock().unwrap();
-                        philo.activity = Activity::TakingFork;
-                        println!("{}", philo);
-                        let _left_fork = forks[f[position % 2 + 1]].lock().unwrap();
-                        println!("{}", philo);
-                        philo.activity = Activity::Eat;
-                        println!("{}", philo);
-                        philo.ts_last_eat = SystemTime::now();
-                        thread::sleep(time::Duration::from_millis(TIME_EAT as u64));
-                    }
-                    _ => panic!("incorrect state"),
-                }
-                if SystemTime::now()
-                    .duration_since(philo.ts_last_eat)
-                    .unwrap()
-                    .as_millis()
-                    >= TIME_DIE
-                {
-                    let mut dead = dead_philo.lock().unwrap();
-                    *dead = true;
-                    return;
-                }
-                if *dead_philo.lock().unwrap() {
-                    return;
+fn philo_routine(
+    i: usize,
+    amount: usize,
+    forks: Arc<Vec<Mutex<i32>>>,
+    dead_philo: Arc<Mutex<bool>>,
+) {
+    let mut philo = Philosopher::new(i);
+    let position = philo.table_position;
+    // allows to pick position, (position + amount - 1) % amount if position is even and (position + amount - 1) % amount, position if position is odd
+    let f = vec![position, (position + amount - 1) % amount, position];
+    // allows to keep the mutex for the forks until the values are popped when done eating
+    let mut dishes: Vec<MutexGuard<i32>> = vec![];
+    loop {
+        match philo.activity {
+            Activity::Start => philo.activity = Activity::Eat,
+            Activity::Sleep => {
+                println!("{}", philo);
+                thread::sleep(time::Duration::from_millis(TIME_SLEEP as u64));
+                philo.activity = Activity::Think;
+            }
+            Activity::Think => {
+                println!("{}", philo);
+                philo.activity = Activity::Eat;
+            }
+            Activity::Eat => {
+                philo.activity = Activity::TakingFork;
+                dishes.push(forks[f[position % 2]].lock().unwrap());
+                println!("{}", philo);
+                dishes.push(forks[f[position % 2 + 1]].lock().unwrap());
+                println!("{}", philo);
+                philo.activity = Activity::Eating;
+                println!("{}", philo);
+                philo.ts_eating = SystemTime::now();
+            }
+            Activity::Eating => {
+                if philo.is_done_eating() {
+                    philo.ts_last_eat = SystemTime::now();
+                    philo.activity = Activity::Sleep;
+                    dishes.pop();
+                    dishes.pop();
                 }
             }
+            _ => panic!("incorrect state"),
+        }
+        if philo.is_dead() {
+            let mut dead = dead_philo.lock().unwrap();
+            *dead = true;
+            return;
+        }
+        if *dead_philo.lock().unwrap() {
+            return;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -155,7 +182,7 @@ mod tests {
 
     #[test]
     fn test_n_philosopher() {
-        let handles = start_dinning(50).unwrap();
+        let handles = start_dinning(10).unwrap();
         for h in handles {
             h.join().unwrap();
         }
