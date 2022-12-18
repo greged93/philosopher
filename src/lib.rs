@@ -19,7 +19,6 @@ enum Activity {
     TakingFork,
 }
 
-// TODO implement the drop trait for philosopher allowing you to just print died when dropped
 struct Philosopher {
     pub activity: Activity,
     pub ts_last_eat: SystemTime,
@@ -74,7 +73,6 @@ impl Philosopher {
     }
 }
 
-// TODO make a philoroutine function for the thread
 // TODO add state eating, eating has minimum time and can die while eating
 pub fn start_dinning(amount: usize) -> Result<Vec<JoinHandle<()>>, Error> {
     let mut handles = vec![];
@@ -85,9 +83,13 @@ pub fn start_dinning(amount: usize) -> Result<Vec<JoinHandle<()>>, Error> {
     for i in 0..amount {
         let my_dead_philo = Arc::clone(&dead_philo);
         let my_forks = Arc::clone(&forks);
-        let handle = thread::spawn(move || {
-            println!("Spawing philosopher");
-            let forks = my_forks;
+        let handle = thread::spawn(move || philo_routine(i, amount, my_forks, my_dead_philo));
+        handles.push(handle);
+    }
+    return Ok(handles);
+}
+
+fn philo_routine(i: usize, amount: usize, forks: Arc<Vec<Mutex<i32>>>, dead_philo: Arc<Mutex<bool>>){
             let mut philo = Philosopher::new(i);
             let position = philo.table_position;
             // allows to pick position, (position + amount - 1) % amount if position is even and (position + amount - 1) % amount, position if position is odd
@@ -101,11 +103,10 @@ pub fn start_dinning(amount: usize) -> Result<Vec<JoinHandle<()>>, Error> {
                     }
                     Activity::Think => {
                         println!("{}", philo);
-                        // TODO thinking has no duration time, should just be a state after eating before taking both forks
                     }
                     Activity::Eat => {
-                        philo.activity = Activity::TakingFork;
                         let _right_fork = forks[f[position % 2]].lock().unwrap();
+                        philo.activity = Activity::TakingFork;
                         println!("{}", philo);
                         let _left_fork = forks[f[position % 2 + 1]].lock().unwrap();
                         println!("{}", philo);
@@ -122,18 +123,14 @@ pub fn start_dinning(amount: usize) -> Result<Vec<JoinHandle<()>>, Error> {
                     .as_millis()
                     >= TIME_DIE
                 {
-                    let mut dead = my_dead_philo.lock().unwrap();
+                    let mut dead = dead_philo.lock().unwrap();
                     *dead = true;
                     return;
                 }
-                if *my_dead_philo.lock().unwrap() {
+                if *dead_philo.lock().unwrap() {
                     return;
                 }
             }
-        });
-        handles.push(handle);
-    }
-    return Ok(handles);
 }
 
 #[cfg(test)]
