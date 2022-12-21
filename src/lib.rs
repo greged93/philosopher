@@ -64,12 +64,12 @@ impl Drop for Philosopher {
 
 impl Philosopher {
     pub fn new(pos: usize) -> Self {
-        return Philosopher {
+        Philosopher {
             activity: Activity::Start,
             ts_last_eat: SystemTime::now(),
             ts_eating: SystemTime::now(),
             table_position: pos,
-        };
+        }
     }
 
     pub fn is_dead(&self) -> bool {
@@ -102,7 +102,7 @@ pub fn start_dinning(amount: usize) -> Result<Vec<JoinHandle<()>>, Error> {
         handles.push(handle);
         thread::sleep(time::Duration::from_nanos(100));
     }
-    return Ok(handles);
+    Ok(handles)
 }
 
 fn philo_routine(
