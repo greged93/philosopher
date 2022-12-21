@@ -100,6 +100,7 @@ pub fn start_dinning(amount: usize) -> Result<Vec<JoinHandle<()>>, Error> {
         let my_forks = Arc::clone(&forks);
         let handle = thread::spawn(move || philo_routine(i, amount, my_forks, my_dead_philo));
         handles.push(handle);
+        thread::sleep(time::Duration::from_nanos(100));
     }
     return Ok(handles);
 }
@@ -181,7 +182,7 @@ mod tests {
 
     #[test]
     fn test_n_philosopher() {
-        let handles = start_dinning(10).unwrap();
+        let handles = start_dinning(16).unwrap();
         for h in handles {
             h.join().unwrap();
         }
